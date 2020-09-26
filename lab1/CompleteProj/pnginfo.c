@@ -4,6 +4,7 @@
 #include <string.h>
 #include "crc.h"
 #include "lab_png.h"
+#include <arpa/inet.h>
 
 
 int is_png(U8 *buf, size_t n){
@@ -28,11 +29,11 @@ int get_png_data_IHDR(struct data_IHDR *out, FILE *fp, long offset, int whence){
     U32 four_bytes;
 	U8 one_byte;
 
-	fseek(fp, 20, whence);
+	fseek(fp, 16, whence);
     fread(&four_bytes, 4, 1, fp);
-	int a = four_bytes;
+	four_bytes = htonl(four_bytes);
 	printf("---------------\n");
-	printf("%d\n", a);
+	printf("%d\n", four_bytes);
 	printf("---------------\n");
 
 
