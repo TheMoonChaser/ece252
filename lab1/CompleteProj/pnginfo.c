@@ -113,19 +113,55 @@ int main(int argc, char *argv[])
 	U8 data_IHDR[13];
 	fread(data_IHDR,1,13,f);
 	fread(&crc_out,4,1,f);
-	crc_out = htonl(crc_out);
+	crc_out = ntohl(crc_out);
 	//check IHDR CRC value
 	len_td = CHUNK_TYPE_SIZE + DATA_IHDR_SIZE;
 	U8 type_data_IHDR[17];
 	memcpy(type_data_IHDR,type,4);
-	strcat(type_data_IHDR,data_IHDR);
+	memcpy(type_data_IHDR+4,data_IHDR,13);
 	crc_val = crc(type_data_IHDR,len_td);
     if (crc_out != crc_val){
-		printf("IHDR chunk CRC error: computed %x, expected %x\n",crc_out,crc_val);
+		printf("IHDR chunk CRC error: computed %x, expected %x\n",crc_val,crc_out);
 	    fclose(f);
 		return 0;
 	}
 
+	//get IDAT CRC
+	U32 IDAT_len;
+	fread(&IDAT_len,4,1,f);
+	IDAT_len = ntohl(IDAT_len);
+	const int IDAT_data_len = IDAT_len;
+	const int IDAT_td_len = IDAT_data_len+CHUNK_TYPE_SIZE;
+
+	fread(type,1,4,f);
+	U8 IDAT_data[IDAT_data_len];
+	fread(IDAT_data,1,IDAT_data_len,f);
+	fread(&crc_out,4,1,f);
+	crc_out=ntohl(crc_out);
+	//check IDAT crc value
+	len_td = CHUNK_TYPE_SIZE+IDAT_data_len;
+	//IDAT_td contains type+data
+	U8 IDAT_td[IDAT_td_len];
+	memcpy(IDAT_td,type,4);
+	memcpy(IDAT_td+4,IDAT_data,IDAT_data_len);
+	crc_val = crc(IDAT_td,len_td);
+	if (crc_out != crc_val){
+		printf("IDAT chunk CRC error: computed %x, expected %x\n",crc_val,crc_out);
+		fclose(f);
+		return 0;
+	}
+	
+	//get IEND CRC
+	fseek(f,4,SEEK_CUR);
+	fread(type,1,4,f);
+	fread(&crc_out,4,1,f);
+	crc_out = ntohl(crc_out);
+	crc_val = crc(type,CHUNK_TYPE_SIZE);
+	if (crc_out != crc_val){
+		printf("IEND chunk CRC error: computed %x, expected %x\n",crc_val,crc_out);
+		fclose(f);
+		return 0;
+	}
 
 	fclose(f);
 
