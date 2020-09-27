@@ -37,18 +37,18 @@ int main(int argc, char *argv[]) {
         f = fopen(argv[i], "rb");
         //get width 
         fseek(f, 16, SEEK_SET);
-		fread(&current_width, 4, 1, f);
+        fread(&current_width, 4, 1, f);
         current_width = ntohl(current_width);
 
         //get total height
         fread(&current_height, 4, 1, f);
         current_height = ntohl(current_height);
-		total_height += current_height;
+        total_height += current_height;
 
         //get IDAT length field
         fseek(f, 33, SEEK_SET);
         fread(&curr_len_inf, 4, 1, f);
-		curr_len_inf = ntohl(curr_len_inf);
+        curr_len_inf = ntohl(curr_len_inf);
 
         //get IDAT data and outputs to a new file
         const int curr_IDAT_length = curr_len_inf;
