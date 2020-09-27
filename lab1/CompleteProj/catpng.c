@@ -140,9 +140,12 @@ int main(int argc, char *argv[]) {
     U8 IDAT_type[CHUNK_TYPE_SIZE];
     U32 len_def_total_size = 0; 
     U32 computed_IDAT_CRC;
+	U32 IDAT_length;
     
-    //read IDAT type field 
-    fseek(f, CHUNK_LEN_SIZE+CHUNK_CRC_SIZE, SEEK_CUR);
+    //read initial IDAT length and type field 
+    fseek(f, CHUNK_CRC_SIZE, SEEK_CUR);
+    fread(&IDAT_length, 1, 4, f);
+    IDAT_length = ntohl(IDAT_length);
     fread(IDAT_type, 1, 4, f);
     //get, set IDAT length field, type field and data field
     //compress data field
@@ -161,41 +164,43 @@ int main(int argc, char *argv[]) {
     }
 
     //compute and write IDAT CRC
-    //const int type_data_size = CHUNK_TYPE_SIZE + len_def_total_size;
-    //U8 type_data_IDAT[type_data_size];
-    //uint64_t len_td_IDAT = CHUNK_TYPE_SIZE + len_def_total_size;
-    //memcpy(type_data_IDAT, IDAT_type, 4); 
-    //memcpy(type_data_IDAT+CHUNK_TYPE_SIZE, gp_buf_def, len_def_total_size);
-    //computed_IDAT_CRC = crc(type_data_IDAT, len_td_IDAT); 
-    //computed_IDAT_CRC = htonl(computed_IDAT_CRC);
-    //fwrite(&computed_IDAT_CRC, 4, 1, combined_file);
+    const int type_data_size = CHUNK_TYPE_SIZE + len_def_total_size;
+    U8 type_data_IDAT[type_data_size];
+    uint64_t len_td_IDAT = CHUNK_TYPE_SIZE + len_def_total_size;
+    memcpy(type_data_IDAT, IDAT_type, 4); 
+    memcpy(type_data_IDAT+CHUNK_TYPE_SIZE, gp_buf_def, len_def_total_size);
+    computed_IDAT_CRC = crc(type_data_IDAT, len_td_IDAT); 
+    computed_IDAT_CRC = htonl(computed_IDAT_CRC);
+    fwrite(&computed_IDAT_CRC, 4, 1, combined_file);
     
-    ////read IEND Chunk
-    //U32 IEND_length;
-    //U8 IEND_type[CHUNK_TYPE_SIZE];
-    //U32 IEND_CRC;
-    //
-    ////read IEND length field
-    //fseek(f, len_def_total_size+CHUNK_CRC_SIZE, SEEK_CUR);
-    //fread(&IEND_length, 4, 1, f);
-    //IEND_length = ntohl(IEND_length);
-    //IEND_length = htonl(IEND_length);	
-    ////write IEND length field
-    //fwrite(&IEND_length, 4, 1, combined_file);
-    //
-    ////read IEND type
-    //fread(IEND_type, 1, 4, f);
-    ////write IEND type
-    //fwrite(IEND_type, 1, 4, combined_file);
-    //
-    ////read IEND CRC
-    //fread(&IEND_CRC, 4, 1, f);
-    //IEND_CRC = ntohl(IEND_CRC);
-    //IEND_CRC = htonl(IEND_CRC);
-    ////write IEND CRC  
-    //fwrite(&IEND_CRC, 4, 1, combined_file);
-    //
+    //read IEND Chunk
+    U32 IEND_length;
+    U8 IEND_type[CHUNK_TYPE_SIZE];
+    U32 IEND_CRC;
+    
+    //read IEND length field
+    fseek(f, IDAT_length+CHUNK_CRC_SIZE, SEEK_CUR);
+    fread(&IEND_length, 4, 1, f);
+    IEND_length = ntohl(IEND_length);
+    IEND_length = htonl(IEND_length);	
+    //write IEND length field
+    fwrite(&IEND_length, 4, 1, combined_file);
+
+    //read IEND type
+    fread(IEND_type, 1, 4, f);
+    //write IEND type
+    fwrite(IEND_type, 1, 4, combined_file);
+    
+    //read IEND CRC
+    fread(&IEND_CRC, 4, 1, f);
+    IEND_CRC = ntohl(IEND_CRC);
+    IEND_CRC = htonl(IEND_CRC);
+    //write IEND CRC  
+    fwrite(&IEND_CRC, 4, 1, combined_file);
+    
     fclose(combined_file);
     fclose(f);
+    //remove helper file
+    remove("TempFile.bin");
     return 0;
 }
