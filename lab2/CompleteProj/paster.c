@@ -300,7 +300,7 @@ int main(int argc, char **argv) {
       if (pthread_create(&tid[i],NULL,get_fragment,modified_url) != 0){
 	     current_thread_num = i;
 		 //Thread num should be from 0 to t-1
-		 printf("Thread #%d failed to create!",i);
+		 printf("Thread #%d failed to create!\n",i);
 		 //This issue could be mainly a capacity issue because number of threads we can generate is limited by ECEubuntu server. 
 		 //We need to stop generating new threads.
 		 break;
