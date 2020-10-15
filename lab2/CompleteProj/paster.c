@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <curl/curl.h>
 #include <getopt.h>
+#include <semaphore.h>
 #include "catpng.h"
 
 #define ECE252_HEADER "X-Ece252-Fragment: "
@@ -16,6 +17,10 @@
      _a > _b ? _a : _b; })
 int fragment_counter = 0; //counts the number of fragments completed
 int fragment_numbers[50]; //store the fragment numbers
+/*
+ *   Use semaphore to handle the sychronization issue.
+ * */
+sem_t sem;
 
 typedef struct recv_buf2 {
       char *buf;       /* memory to hold a copy of received data */
@@ -208,12 +213,14 @@ void* get_fragment(void* thread_input){
       }
 
       /* check whether the sequence number already exists */
+	  sem_wait(&sem);
       if(fragment_numbers[recv_buf.seq] == -1){
          fragment_numbers[recv_buf.seq] = recv_buf.seq;
          sprintf(fname, "./%d.png", recv_buf.seq+1);
          write_file(fname, recv_buf.buf, recv_buf.size);
          fragment_counter += 1;
       }
+	  sem_post(&sem);
 
       /* cleaning up */
       curl_easy_cleanup(curl_handle);
@@ -276,11 +283,29 @@ int main(int argc, char **argv) {
    sprintf(modified_url[0], "http://ece252-1.uwaterloo.ca:2520/image?img=%d", n);
    sprintf(modified_url[1], "http://ece252-2.uwaterloo.ca:2520/image?img=%d", n);
    sprintf(modified_url[2], "http://ece252-3.uwaterloo.ca:2520/image?img=%d", n);
+   
+   //initialize semaphore
+   sem_init(&sem,0,1);
+
+   //initialize threads
+   const int thread_num = t;
+   pthread_t tid[thread_num];
 
    //initialize libcurl before any thread
    curl_global_init(CURL_GLOBAL_DEFAULT);
+	
+   //create threads
+   for (int i=0;i<t;i++){
+      pthread_create(&tid[i],NULL,get_fragment,modified_url);
+   }
 
-   get_fragment(modified_url);
+   //join threads
+   for (int i=0;i<t;i++){
+      pthread_join(tid[i],NULL);
+   }
+   
+   //Use for single thread.
+   //get_fragment(modified_url);
 
    //store 50 fragment files names
    char **fragment_files;
@@ -306,6 +331,8 @@ int main(int argc, char **argv) {
       free(modified_url[i]);
    }
    free(modified_url);
+
+   sem_destroy(&sem);
    curl_global_cleanup();
    pthread_exit(0);
 }
