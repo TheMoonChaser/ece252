@@ -295,12 +295,20 @@ int main(int argc, char **argv) {
    curl_global_init(CURL_GLOBAL_DEFAULT);
 	
    //create threads
+   int current_thread_num = t;
    for (int i=0;i<t;i++){
-      pthread_create(&tid[i],NULL,get_fragment,modified_url);
+      if (pthread_create(&tid[i],NULL,get_fragment,modified_url) != 0){
+	     current_thread_num = i;
+		 //Thread num should be from 0 to t-1
+		 printf("Thread #%d failed to create!",i);
+		 //This issue could be mainly a capacity issue because number of threads we can generate is limited by ECEubuntu server. 
+		 //We need to stop generating new threads.
+		 break;
+	  }
    }
 
-   //join threads
-   for (int i=0;i<t;i++){
+   //join threads based on how many threads we generated.
+   for (int i=0;i<current_thread_num;i++){
       pthread_join(tid[i],NULL);
    }
    
@@ -318,7 +326,7 @@ int main(int argc, char **argv) {
    //concate png segments into a single png file
    cat_png(fragment_files, fragment_counter);
 
-   printf("%d", fragment_counter);
+   //printf("%d", fragment_counter);
    //deallocate and remove helper files
    for(int i = 0; i < (fragment_counter); i++){
       remove(fragment_files[i]);
