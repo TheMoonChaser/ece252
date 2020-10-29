@@ -118,6 +118,17 @@ int recv_buf_init(RECV_BUF *ptr, size_t nbytes)
     return 0;
 }
 
+int recv_buf_cleanup(RECV_BUF *ptr){
+	if (ptr == NULL){
+		return 1;
+	}
+
+	free(ptr->buf);
+	ptr->size = 0;
+	ptr->max_size = 0;
+	return 0;
+}
+
 /**
  * @brief output data in memory to a file
  * @param path const char *, output file path
@@ -161,7 +172,7 @@ void produce(char** server_url){
     char url[256];
 
     
-    while(counter < 50){  
+    while(*counter < 50){  
         CURL *curl_handle;
 	    CURLcode res;
         RECV_BUF recv_buf;
@@ -169,9 +180,13 @@ void produce(char** server_url){
         //initialize buffer
         recv_buf_init(&recv_buf, BUF_SIZE);
 
+		//initialize url everytime to make sure url is not overwrite.
+		memset(url,'\0',sizeof(url));
+
         //semwait
-        //concate url with count
-        //count++
+		//if *counter >= 50, sempost, recv_buff_clean_up, then break to exit the while loop!!!!!!!!!!
+        //concate server_url[server_num-1] with *count to get url
+        //*count++
         //sempost
         
         /* init a curl session */
@@ -205,11 +220,25 @@ void produce(char** server_url){
         if( res != CURLE_OK) {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         }
+		/* Put struct recv_buf to Producer-consumer buffer. 
+		 * Cannot put recv_buf's pointer because it will be cleanuped later*/
+
+
         /* cleaning up */
         curl_easy_cleanup(curl_handle);
-        curl_global_cleanup();
-        shmdt(p_shm_recv_buf);
+		// cleanup recv_buf 
+        recv_buf_cleanup(&recv_buf);
+		// for using different server
+		server_num+=1;
+		if (server_num == 4){
+			server_num = 1;
+		}	
      }
+	 //Detach all shared memory here becuase producer process will not have more things to do. 
+	 //Ex. counter,sems,producer-consumer buffer, etc.
+	 shmdt(counter);
+	 //cleanup curl_global
+	 curl_global_cleanup();
 }
 
 void consume(){
@@ -221,6 +250,7 @@ int main(int argc, char* argv[])
        fprintf(stderr, "Usage: %s B P C X N\n", argv[0]);
        exit(1);
     }
+	
     
     //handle inputs
     int B = atoi(argv[1]);       //number of segments stored in buff
@@ -237,9 +267,9 @@ int main(int argc, char* argv[])
     }
 
     //modify urls
-    sprintf(modified_url[0], "http://ece252-1.uwaterloo.ca:2530/image?img=%d", N);
-    sprintf(modified_url[1], "http://ece252-2.uwaterloo.ca:2530/image?img=%d", N);
-    sprintf(modified_url[2], "http://ece252-3.uwaterloo.ca:2530/image?img=%d", N);
+    sprintf(modified_url[0], "http://ece252-1.uwaterloo.ca:2530/image?img=%d&part=", N);
+    sprintf(modified_url[1], "http://ece252-2.uwaterloo.ca:2530/image?img=%d&part=", N);
+    sprintf(modified_url[2], "http://ece252-3.uwaterloo.ca:2530/image?img=%d&part=", N);
 
     const int NUM_CHILD = P + C;
     int i = 0;
@@ -248,6 +278,15 @@ int main(int argc, char* argv[])
     int state;
     double times[2];
     struct timeval tv;
+
+	//Timer start.
+	if (gettimeofday(&tv, NULL) != 0) {
+         perror("gettimeofday");
+         abort();
+    }
+	times[0] = (tv.tv_sec) + tv.tv_usec/1000000.;
+
+	// Declaration of all elements in shared memory
     int *count;             //shared count fragement
 
     /* allocate shared memory regions */
@@ -257,13 +296,7 @@ int main(int argc, char* argv[])
     /* initialize shared memory variables */
     *count = 0;
 
-    if (gettimeofday(&tv, NULL) != 0) {
-        perror("gettimeofday");
-        abort();
-    }
-    times[0] = (tv.tv_sec) + tv.tv_usec/1000000.;
-
-    
+    //Create processes.
     for ( i = 0; i < NUM_CHILD; i++) {
 
         pid = fork();
@@ -290,6 +323,9 @@ int main(int argc, char* argv[])
                 printf("Child cpid[%d]=%d terminated with state: %d.\n", i, cpids[i], state);
             }
         }
+		//For parent process, we need to concate the image.
+
+
         if (gettimeofday(&tv, NULL) != 0) {
             perror("gettimeofday");
             abort();
