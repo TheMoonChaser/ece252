@@ -26,8 +26,9 @@ typedef struct recv_buf_flat {
 
 size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata);
 size_t write_cb_curl(char *p_recv, size_t size, size_t nmemb, void *p_userdata);
-int sizeof_shm_recv_buf(size_t nbytes);
-int shm_recv_buf_init(RECV_BUF *ptr, size_t max_size);
+int sizeof_recv_buf(size_t nbytes);
+int recv_buf_init(RECV_BUF *ptr, size_t nbytes);
+int recv_buf_cleanup(RECV_BUF *ptr);
 int write_file(const char *path, const void *in, size_t len);
 
 
@@ -48,9 +49,9 @@ int write_file(const char *path, const void *in, size_t len);
 size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata)
 {
     int realsize = size * nmemb;
->>  RECV_BUF *p = userdata;
+    RECV_BUF *p = userdata;
 
->>  if (realsize > strlen(ECE252_HEADER) &&
+    if (realsize > strlen(ECE252_HEADER) &&
     strncmp(p_recv, ECE252_HEADER, strlen(ECE252_HEADER)) == 0) {
 
     /* extract img sequence number */
