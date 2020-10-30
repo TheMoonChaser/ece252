@@ -334,11 +334,12 @@ int main(int argc, char* argv[])
         times[1] = (tv.tv_sec) + tv.tv_usec/1000000.;
         printf("paster2 execution time: %.6lf seconds\n", times[1] - times[0]);
         
-        //deallocate urls
-        for(int i = 0; i < 3; i++){
-            free(modified_url[i]);
-        }
-        free(modified_url);
     }
+    //deallocate urls
+    for(int i = 0; i < 3; i++){
+        free(modified_url[i]);
+    }
+    free(modified_url);
+
     return 0;
 }
