@@ -210,22 +210,10 @@ int main(int argc, char* argv[])
     }
 	times[0] = (tv.tv_sec) + tv.tv_usec/1000000.;
 
-    //Image URLs
-	char **modified_url;
-    modified_url = malloc(3*sizeof(char*));
-    for(int i = 0; i < 3; i++){
-        modified_url[i] = malloc(256*sizeof(char));
-    }
-
-    //modify urls
-    sprintf(modified_url[0], "http://ece252-1.uwaterloo.ca:2530/image?img=%d&part=", N);
-    sprintf(modified_url[1], "http://ece252-2.uwaterloo.ca:2530/image?img=%d&part=", N);
-    sprintf(modified_url[2], "http://ece252-3.uwaterloo.ca:2530/image?img=%d&part=", N);
-    
 	// Declaration of all elements in shared memory
     int *count;             //shared count fragement
     sem_t *sems;            //sem used for 50 size counter
-    U8 **storage;			//store all IDAT data
+    //U8 **storage;			//store all IDAT data
 
     /* allocate shared memory regions */
     int shmid_count = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
@@ -234,8 +222,8 @@ int main(int argc, char* argv[])
 
     /* attach to shared memory regions */
     count = (int*)shmat(shmid_count, NULL, 0);
-	sems = shmat(shmid_sems, NULL, 0);
-    queue = shmat(shmid_stack, NULL, 0);
+	sems = (sem_t *)shmat(shmid_sems, NULL, 0);
+    queue = (struct int_stack*)shmat(shmid_stack, NULL, 0);
 
     /* initialize shared memory variables */
     *count = 0;
@@ -295,9 +283,6 @@ int main(int argc, char* argv[])
                 
         		//initialize url everytime to make sure url is not overwrite.
         		memset(url,'\0',sizeof(url));
-        		//copy the url to the local string
-        		strcpy(url, modified_url[server_num-1]);
-	           
                 //semwait
                 sem_wait(&sems[0]); 
         		//concat the url
@@ -306,9 +291,8 @@ int main(int argc, char* argv[])
 				    sem_post(&sems[0]);
 				    break;	
 				}
-        		char* counter = {0};
-			    sprintf(counter, "%d", *count);
-        	    strcat(url, counter);
+				sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", server_num, N, *count);
+				printf("%s\n", url);
         	    *count += 1;
                 //sempost
 	            sem_post(&sems[0]);
@@ -384,9 +368,8 @@ int main(int argc, char* argv[])
 			sem_wait(&sems[1]);
 
 			//write segment data into a file
-			sprintf(fname, "./%d.png", pop_buf->seq);
+			sprintf(fname, "./%d.png", pop_buf->seq+1);
 	        write_file(fname, pop_buf->buf, pop_buf->size);
-			printf("-------------\n");
 
             shmdt(sems);
 		    shmdt(queue);
@@ -412,7 +395,7 @@ int main(int argc, char* argv[])
 		fragment_files = malloc((50)*sizeof(char*));
         for(int i = 0; i < 50; i++){
         	fragment_files[i] = malloc(256*sizeof(char));
-        	sprintf(fragment_files[i], "./%d.png", i);
+        	sprintf(fragment_files[i], "./%d.png", i+1);
 		}
 
 		//concate png segments into a single png file
@@ -452,10 +435,10 @@ int main(int argc, char* argv[])
     }
 
     //deallocate urls for all process
-    for(int i = 0; i < 3; i++){
-        free(modified_url[i]);
-    }
-    free(modified_url);
+    //for(int i = 0; i < 3; i++){
+    //    free(modified_url[i]);
+    //}
+    //free(modified_url);
 
     return 0;
 }
