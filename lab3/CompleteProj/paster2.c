@@ -116,35 +116,35 @@ int sizeof_recv_buf(size_t nbytes)
 
 int recv_buf_init(RECV_BUF *ptr, size_t nbytes)
 {
-    void *p = NULL;
+    //void *p = NULL;
 
     if ( ptr == NULL ) {
         return 1;
     }
     
-	p = malloc(nbytes);
-	if (p == NULL) {
-	    return 2;
-	}
+	//p = malloc(nbytes);
+	//if (p == NULL) {
+	//    return 2;
+	//}
 
-    ptr->buf = (char *)p;
+    ptr->buf = (char *)ptr + sizeof(RECV_BUF);
     ptr->size = 0;
     ptr->max_size = nbytes;
     ptr->seq = -1;              /* valid seq should be non-negative */
     return 0;
 }
 
-int recv_buf_cleanup(RECV_BUF *ptr) {
-   if (ptr == NULL) {
-      return 1;
-   }
-
-   free(ptr->buf);
-   ptr->size = 0;
-   ptr->max_size = 0;
-   return 0;
-}
-
+//int recv_buf_cleanup(RECV_BUF *ptr) {
+//    if (ptr == NULL) {
+//         return 1;
+//    }
+//
+//    free(ptr->buf);
+//    ptr->size = 0;
+//    ptr->max_size = 0;
+//    return 0;
+//}
+//
 
 /**
  * @brief output data in memory to a file
@@ -202,8 +202,6 @@ int main(int argc, char* argv[])
     int state;                     //for waiting child process
     double times[2];               //for time count
     struct timeval tv;             //for time count
-	struct int_stack *queue;       //storing B numbers of fragments
-    int shm_stack_size = sizeof_shm_stack(B); //size of stack
 
 	//Timer start.
 	if (gettimeofday(&tv, NULL) != 0) {
@@ -215,20 +213,26 @@ int main(int argc, char* argv[])
 	// Declaration of all elements in shared memory
     int *count;             //shared count fragement
     sem_t *sems;            //sem used for 50 size counter
-    //U8 **storage;			//store all IDAT data
+ 	struct int_stack *queue;       //storing B numbers of fragments
+    int shm_stack_size = sizeof_shm_stack(B); //size of stack
+    int *count_pop;			//count number of poped fragments
+   //U8 **storage;			//store all IDAT data
 
     /* allocate shared memory regions */
     int shmid_count = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    int shmid_count_pop = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
 	int shmid_sems = shmget(IPC_PRIVATE, sizeof(sem_t) * NUM_SEMS, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
 	int shmid_stack = shmget(IPC_PRIVATE, shm_stack_size, IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
 
     /* attach to shared memory regions */
     count = (int*)shmat(shmid_count, NULL, 0);
+	count_pop = (int*)shmat(shmid_count_pop, NULL, 0);
 	sems = (sem_t*)shmat(shmid_sems, NULL, 0);
     queue = (struct int_stack*)shmat(shmid_stack, NULL, 0);
 
     /* initialize shared memory variables */
     *count = 0;
+	*count_pop = 0;
     if(init_shm_stack(queue, B) != 0){
 	    printf("unable to initialize stack\n");
 	}
@@ -271,6 +275,7 @@ int main(int argc, char* argv[])
         if ( pid > 0 ) {                     /* parent process */
             cpids[i] = pid;
         } else if ( pid == 0 && i < P) {     /* child process for producer */
+			printf("--------------------producer-------\n");
             int server_num = 1;	
             //initialize curl
             curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -341,7 +346,7 @@ int main(int argc, char* argv[])
         
                 /* cleaning up */
                 curl_easy_cleanup(curl_handle);
-                recv_buf_cleanup(&recv_buf);
+                //recv_buf_cleanup(&recv_buf);
 
         		// for using different server
         		server_num+=1;
@@ -353,31 +358,45 @@ int main(int argc, char* argv[])
             shmdt(sems);
 		    shmdt(queue);
         	shmdt(count);
+			shmdt(count_pop);
         	//cleanup curl_global
         	curl_global_cleanup();
 
             break;
 		} else if ( pid == 0 && i >= P ) {   /* child process for consumer */
-            char fname[256];
-            RECV_BUF* pop_buf;
+			printf("--------------------consumer-------\n");
+			while(*count_pop < 50){
+                char fname[256];
+                RECV_BUF pop_buf;
+    
+                //initialize buffer
+    			recv_buf_init(&pop_buf, BUF_SIZE);
+    
+    		    //pop buff from stack
+    	        sem_wait(&sems[2]);
+    			sem_wait(&sems[3]);
+    		    pop(queue, &pop_buf); 
+                if(*count_pop >= 50){
+                    sem_post(&sems[3]);
+				    sem_post(&sems[1]);
+				    break;	
+				}	
+    			*count_pop += 1;
+    			printf("--------------(%d)------\n", pop_buf.seq);
+    			sem_post(&sems[3]);
+    			sem_post(&sems[1]);
 
-            //initialize buffer
-			recv_buf_init(pop_buf, BUF_SIZE);
-
-		    //pop buff from stack
-	        sem_wait(&sems[2]);
-			sem_wait(&sems[3]);
-		    pop(queue, pop_buf); 
-			sem_wait(&sems[3]);
-			sem_wait(&sems[1]);
-
-			//write segment data into a file
-			sprintf(fname, "./%d.png", pop_buf->seq+1);
-	        write_file(fname, pop_buf->buf, pop_buf->size);
+                //write segment data into a file
+    			sprintf(fname, "./%d.png", pop_buf.seq+1);
+                printf("%d   %zu     %s\n", pop_buf.seq, pop_buf.size, pop_buf.buf);
+    	        write_file(fname, pop_buf.buf, pop_buf.size);
+				//recv_buf_cleanup(&pop_buf);
+            } 
 
             shmdt(sems);
 		    shmdt(queue);
         	shmdt(count);
+			shmdt(count_pop);
             break;
         } else {
             perror("fork");
@@ -416,11 +435,13 @@ int main(int argc, char* argv[])
         shmdt(sems);
 		shmdt(queue);
         shmdt(count);
+		shmdt(count_pop);
 
 		//destroy all shared memories
 	    shmctl(shmid_count, IPC_RMID, NULL);
 	    shmctl(shmid_stack, IPC_RMID, NULL);
 	    shmctl(shmid_sems, IPC_RMID, NULL);
+		shmctl(shmid_count_pop, IPC_RMID, NULL);
 
         //destroy all sems
 		sem_destroy(&sems[0]);
@@ -437,12 +458,6 @@ int main(int argc, char* argv[])
         printf("paster2 execution time: %.6lf seconds\n", times[1] - times[0]);
         
     }
-
-    //deallocate urls for all process
-    //for(int i = 0; i < 3; i++){
-    //    free(modified_url[i]);
-    //}
-    //free(modified_url);
 
     return 0;
 }
