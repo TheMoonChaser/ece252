@@ -116,35 +116,35 @@ int sizeof_recv_buf(size_t nbytes)
 
 int recv_buf_init(RECV_BUF *ptr, size_t nbytes)
 {
-    //void *p = NULL;
+    void *p = NULL;
 
     if ( ptr == NULL ) {
         return 1;
     }
     
-	//p = malloc(nbytes);
-	//if (p == NULL) {
-	//    return 2;
-	//}
+	p = malloc(nbytes);
+	if (p == NULL) {
+	    return 2;
+	}
 
-    ptr->buf = (char *)ptr + sizeof(RECV_BUF);
+    ptr->buf = (char*)p;
     ptr->size = 0;
     ptr->max_size = nbytes;
     ptr->seq = -1;              /* valid seq should be non-negative */
     return 0;
 }
 
-//int recv_buf_cleanup(RECV_BUF *ptr) {
-//    if (ptr == NULL) {
-//         return 1;
-//    }
-//
-//    free(ptr->buf);
-//    ptr->size = 0;
-//    ptr->max_size = 0;
-//    return 0;
-//}
-//
+int recv_buf_cleanup(RECV_BUF *ptr) {
+    if (ptr == NULL) {
+         return 1;
+    }
+
+    free(ptr->buf);
+    ptr->size = 0;
+    ptr->max_size = 0;
+    return 0;
+}
+
 
 /**
  * @brief output data in memory to a file
@@ -179,7 +179,99 @@ int write_file(const char *path, const void *in, size_t len)
     }
     return fclose(fp);
 }
+/*
+void produce(sem_t*sems,int*count,int*server_num,char*url,int N,struct int_stack*queue){
+	 CURL *curl_handle;
+     CURLcode res;
+     RECV_BUF recv_buf;
+  
+     //semwait
+     sem_wait(&sems[0]);
+     //concat the url
+     sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", *server_num, N, *count);
+     *count += 1;
+     //sempost
+     sem_post(&sems[0]);
 
+     //initialize buffer
+     recv_buf_init(&recv_buf, BUF_SIZE);
+     // init a curl session 
+     curl_handle = curl_easy_init();
+
+     if (curl_handle == NULL) {
+         fprintf(stderr, "curl_easy_init: returned NULL\n");
+		 return;
+     }
+   
+     // specify URL to get 
+     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+
+     // register write call back function to process received data 
+     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_cb_curl);
+     // user defined data structure passed to the call back function 
+     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&recv_buf);
+
+     // register header call back function to process received header data 
+     curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION, header_cb_curl);
+     // user defined data structure passed to the call back function 
+     curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, (void *)&recv_buf);
+
+     // some servers requires a user-agent field 
+     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+     // get it! 
+     res = curl_easy_perform(curl_handle);
+
+     if( res != CURLE_OK) {
+         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+		 return;
+     }
+
+     // Put struct recv_buf to Producer-consumer buffer.
+     // Cannot put recv_buf's pointer because it will be cleanuped later
+     sem_wait(&sems[1]);
+     sem_wait(&sems[3]);
+     push(queue, recv_buf);
+	 printf("------------------put data into queue\n");
+	 sem_post(&sems[3]);
+     sem_post(&sems[2]);
+
+     // cleaning up 
+     curl_easy_cleanup(curl_handle);
+     recv_buf_cleanup(&recv_buf);
+     // for using different server
+     *server_num+=1;
+     if (*server_num == 4){
+         *server_num = 1;
+     }
+}
+*/
+/*
+void consume(int*count_pop,struct int_stack*queue,sem_t*sems){
+    char fname[256];
+    RECV_BUF pop_buf;
+	//initialize buffer
+    recv_buf_init(&pop_buf, BUF_SIZE);
+
+    //pop buff from stack
+    sem_wait(&sems[2]);
+    sem_wait(&sems[3]);
+    pop(queue, &pop_buf);
+	sem_wait(&sems[4]);
+    *count_pop += 1;
+	sem_post(&sems[4]);
+    printf("--------------(%d)------\n", pop_buf.seq);
+    sem_post(&sems[3]);
+    sem_post(&sems[1]);
+
+    //write segment data into a file
+    sprintf(fname, "./%d.png", pop_buf.seq+1);
+    printf("%d   %zu   %s\n", pop_buf.seq, pop_buf.size,pop_buf.buf);
+	write_file(fname, pop_buf.buf, pop_buf.size);
+    recv_buf_cleanup(&pop_buf);
+
+}
+*/
 int main(int argc, char* argv[])
 {
     if (argc < 6) {
@@ -202,6 +294,7 @@ int main(int argc, char* argv[])
     int state;                     //for waiting child process
     double times[2];               //for time count
     struct timeval tv;             //for time count
+	unsigned int sleep_time = 1000*X;
 
 	//Timer start.
 	if (gettimeofday(&tv, NULL) != 0) {
@@ -261,11 +354,12 @@ int main(int argc, char* argv[])
         abort();
     }
 
-    //storage
+    //second_count
     if ( sem_init(&sems[4], SEM_PROC, 1) != 0 ) {
         perror("sem_init(sem[4])");
         abort();
     }
+
 
     //Create processes.
     for ( i = 0; i < NUM_CHILD; i++) {
@@ -275,84 +369,87 @@ int main(int argc, char* argv[])
         if ( pid > 0 ) {                     /* parent process */
             cpids[i] = pid;
         } else if ( pid == 0 && i < P) {     /* child process for producer */
-			printf("--------------------producer-------\n");
-            int server_num = 1;	
+            printf("-------------------produce-------------------\n");
+			int server_num = 1;	
             //initialize curl
             curl_global_init(CURL_GLOBAL_DEFAULT);
             
             char url[256];
-        
             
-            while(*count < 50){  
-                CURL *curl_handle;
-        	    CURLcode res;
-                RECV_BUF recv_buf;
-                
-        		//initialize url everytime to make sure url is not overwrite.
-        		memset(url,'\0',sizeof(url));
-                //semwait
-                sem_wait(&sems[0]); 
-        		//concat the url
-        		//if *counter >= 50, sempost then break to exit the while loop!!!!!!!!!!
+            while(*count < 50){ 
+		 	    sem_wait(&sems[0]);
 	            if(*count >= 50){
 				    sem_post(&sems[0]);
 				    break;	
-				}
-				sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", server_num, N, *count);
-        	    *count += 1;
+				} 
+                sem_post(&sems[0]); 
+				//initialize url
+				memset(url,'\0',sizeof(url));
+				//produce(sems,count,&server_num,url,N,queue);
+				CURL *curl_handle;
+                CURLcode res;
+                RECV_BUF recv_buf;
+
+                //semwait
+                sem_wait(&sems[0]);
+                //concat the url
+                sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", server_num, N, *count);
+                *count += 1;
                 //sempost
-	            sem_post(&sems[0]);
-        
+                sem_post(&sems[0]);
+
                 //initialize buffer
                 recv_buf_init(&recv_buf, BUF_SIZE);
-        
                 /* init a curl session */
                 curl_handle = curl_easy_init();
-              
+
                 if (curl_handle == NULL) {
                     fprintf(stderr, "curl_easy_init: returned NULL\n");
                 }
-              
+   
                 /* specify URL to get */
                 curl_easy_setopt(curl_handle, CURLOPT_URL, url);
-              
+
                 /* register write call back function to process received data */
                 curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_cb_curl);
                 /* user defined data structure passed to the call back function */
                 curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&recv_buf);
-              
+
                 /* register header call back function to process received header data */
                 curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION, header_cb_curl);
                 /* user defined data structure passed to the call back function */
                 curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, (void *)&recv_buf);
-              
+
                 /* some servers requires a user-agent field */
                 curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-              
+
                 /* get it! */
                 res = curl_easy_perform(curl_handle);
-              
+
                 if( res != CURLE_OK) {
                     fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+     
                 }
 
-        		/* Put struct recv_buf to Producer-consumer buffer. 
-        		 * Cannot put recv_buf's pointer because it will be cleanuped later*/
-				sem_wait(&sems[1]);
-			    sem_wait(&sems[3]);
-                push(queue, recv_buf); 
-			    sem_post(&sems[3]);
-				sem_post(&sems[2]);
-        
+                /* Put struct recv_buf to Producer-consumer buffer.
+                 * Cannot put recv_buf's pointer because it will be cleanuped later*/
+                sem_wait(&sems[1]);
+                sem_wait(&sems[3]);
+                push(queue, recv_buf);
+                sem_post(&sems[3]);
+                sem_post(&sems[2]);
+
                 /* cleaning up */
                 curl_easy_cleanup(curl_handle);
-                //recv_buf_cleanup(&recv_buf);
+                recv_buf_cleanup(&recv_buf);
+                // for using different server
+                server_num+=1;
+                if (server_num == 4){
+                    server_num = 1;
+                }
 
-        		// for using different server
-        		server_num+=1;
-        		if (server_num == 4){
-        			server_num = 1;
-        		}	
+				printf("-----------------------produce function called-----------\n");
+              			
             }
         	//Detach all shared memory here becuase producer process will not have more things to do. 
             shmdt(sems);
@@ -361,36 +458,40 @@ int main(int argc, char* argv[])
 			shmdt(count_pop);
         	//cleanup curl_global
         	curl_global_cleanup();
-
             break;
 		} else if ( pid == 0 && i >= P ) {   /* child process for consumer */
 			printf("--------------------consumer-------\n");
 			while(*count_pop < 50){
-                char fname[256];
-                RECV_BUF pop_buf;
-    
-                //initialize buffer
-    			recv_buf_init(&pop_buf, BUF_SIZE);
-    
-    		    //pop buff from stack
-    	        sem_wait(&sems[2]);
-    			sem_wait(&sems[3]);
-    		    pop(queue, &pop_buf); 
-                if(*count_pop >= 50){
-                    sem_post(&sems[3]);
-				    sem_post(&sems[1]);
-				    break;	
-				}	
-    			*count_pop += 1;
-    			printf("--------------(%d)------\n", pop_buf.seq);
-    			sem_post(&sems[3]);
-    			sem_post(&sems[1]);
+                  sem_wait(&sems[4]);
+                  if(*count_pop >= 50){
+                      sem_post(&sems[4]);
+                      break;
+                  }
+                  sem_post(&sems[4]);
+				  //consume(count_pop,queue,sems);
+ 				  char fname[256];
+                  RECV_BUF pop_buf;
+                  //initialize buffer
+                  recv_buf_init(&pop_buf, BUF_SIZE);
 
-                //write segment data into a file
-    			sprintf(fname, "./%d.png", pop_buf.seq+1);
-                printf("%d   %zu     %s\n", pop_buf.seq, pop_buf.size, pop_buf.buf);
-    	        write_file(fname, pop_buf.buf, pop_buf.size);
-				//recv_buf_cleanup(&pop_buf);
+                  //pop buff from stack
+                  sem_wait(&sems[2]);
+                  sem_wait(&sems[3]);
+				  usleep(sleep_time);
+                  pop(queue, &pop_buf);
+                  sem_wait(&sems[4]);
+                  *count_pop += 1;
+                  sem_post(&sems[4]);
+                  sprintf(fname, "./%d.png", pop_buf.seq+1);
+                  printf("%d   %zu   %s\n", pop_buf.seq, pop_buf.size,pop_buf.buf);
+                  write_file(fname, pop_buf.buf, pop_buf.size);
+                  recv_buf_cleanup(&pop_buf);
+                  printf("--------------(%d)------\n", pop_buf.seq);
+                  sem_post(&sems[3]);
+                  sem_post(&sems[1]);
+
+
+                  //write segment data into a file
             } 
 
             shmdt(sems);
