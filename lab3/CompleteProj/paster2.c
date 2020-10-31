@@ -33,16 +33,11 @@ typedef struct recv_buf_flat {
                     /* <0 indicates an invalid seq number */
 } RECV_BUF;
 
-//stack operations
-void push_all(struct int_stack *p, int start);
-void pop_all(struct int_stack *p);
-
 //Curl operations
 size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata);
 size_t write_cb_curl(char *p_recv, size_t size, size_t nmemb, void *p_userdata);
 int sizeof_recv_buf(size_t nbytes);
 int recv_buf_init(RECV_BUF *ptr, size_t nbytes);
-int recv_buf_cleanup(RECV_BUF *ptr);
 int write_file(const char *path, const void *in, size_t len);
 
 
@@ -121,28 +116,35 @@ int sizeof_recv_buf(size_t nbytes)
 
 int recv_buf_init(RECV_BUF *ptr, size_t nbytes)
 {
+    void *p = NULL;
+
     if ( ptr == NULL ) {
         return 1;
     }
+    
+	p = malloc(nbytes);
+	if (p == NULL) {
+	    return 2;
+	}
 
-    ptr->buf = (char *)ptr + sizeof(RECV_BUF);
+    ptr->buf = (char *)p;
     ptr->size = 0;
     ptr->max_size = nbytes;
     ptr->seq = -1;              /* valid seq should be non-negative */
-
     return 0;
 }
 
-int recv_buf_cleanup(RECV_BUF *ptr){
-	if (ptr == NULL){
-		return 1;
-	}
+int recv_buf_cleanup(RECV_BUF *ptr) {
+   if (ptr == NULL) {
+      return 1;
+   }
 
-	free(ptr->buf);
-	ptr->size = 0;
-	ptr->max_size = 0;
-	return 0;
+   free(ptr->buf);
+   ptr->size = 0;
+   ptr->max_size = 0;
+   return 0;
 }
+
 
 /**
  * @brief output data in memory to a file
@@ -222,7 +224,7 @@ int main(int argc, char* argv[])
 
     /* attach to shared memory regions */
     count = (int*)shmat(shmid_count, NULL, 0);
-	sems = (sem_t *)shmat(shmid_sems, NULL, 0);
+	sems = (sem_t*)shmat(shmid_sems, NULL, 0);
     queue = (struct int_stack*)shmat(shmid_stack, NULL, 0);
 
     /* initialize shared memory variables */
@@ -292,7 +294,6 @@ int main(int argc, char* argv[])
 				    break;	
 				}
 				sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", server_num, N, *count);
-				printf("%s\n", url);
         	    *count += 1;
                 //sempost
 	            sem_post(&sems[0]);
@@ -340,8 +341,8 @@ int main(int argc, char* argv[])
         
                 /* cleaning up */
                 curl_easy_cleanup(curl_handle);
-        		// cleanup recv_buf 
                 recv_buf_cleanup(&recv_buf);
+
         		// for using different server
         		server_num+=1;
         		if (server_num == 4){
@@ -359,6 +360,9 @@ int main(int argc, char* argv[])
 		} else if ( pid == 0 && i >= P ) {   /* child process for consumer */
             char fname[256];
             RECV_BUF* pop_buf;
+
+            //initialize buffer
+			recv_buf_init(pop_buf, BUF_SIZE);
 
 		    //pop buff from stack
 	        sem_wait(&sems[2]);
@@ -413,17 +417,17 @@ int main(int argc, char* argv[])
 		shmdt(queue);
         shmdt(count);
 
-		//destroy all sems
+		//destroy all shared memories
+	    shmctl(shmid_count, IPC_RMID, NULL);
+	    shmctl(shmid_stack, IPC_RMID, NULL);
+	    shmctl(shmid_sems, IPC_RMID, NULL);
+
+        //destroy all sems
 		sem_destroy(&sems[0]);
 		sem_destroy(&sems[1]);
 		sem_destroy(&sems[2]);
 		sem_destroy(&sems[3]);
 		sem_destroy(&sems[4]);
-
-		//destroy all shared memories
-	    shmctl(shmid_count, IPC_RMID, NULL);
-	    shmctl(shmid_stack, IPC_RMID, NULL);
-	    shmctl(shmid_sems, IPC_RMID, NULL);
 
         if (gettimeofday(&tv, NULL) != 0) {
             perror("gettimeofday");
