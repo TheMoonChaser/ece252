@@ -376,13 +376,13 @@ int main(int argc, char* argv[])
             
             char url[256];
             
-            while(*count < 50){ 
+            while(1){ 
 		 	    sem_wait(&sems[0]);
 	            if(*count >= 50){
 				    sem_post(&sems[0]);
 				    break;	
 				} 
-                sem_post(&sems[0]); 
+       
 				//initialize url
 				memset(url,'\0',sizeof(url));
 				//produce(sems,count,&server_num,url,N,queue);
@@ -390,8 +390,6 @@ int main(int argc, char* argv[])
                 CURLcode res;
                 RECV_BUF recv_buf;
 
-                //semwait
-                sem_wait(&sems[0]);
                 //concat the url
                 sprintf(url, "http://ece252-%d.uwaterloo.ca:2530/image?img=%d&part=%d", server_num, N, *count);
                 *count += 1;
@@ -461,12 +459,13 @@ int main(int argc, char* argv[])
             break;
 		} else if ( pid == 0 && i >= P ) {   /* child process for consumer */
 			printf("--------------------consumer-------\n");
-			while(*count_pop < 50){
+			while(1){
                   sem_wait(&sems[4]);
                   if(*count_pop >= 50){
                       sem_post(&sems[4]);
                       break;
                   }
+				  *count_pop +=1;
                   sem_post(&sems[4]);
 				  //consume(count_pop,queue,sems);
  				  char fname[256];
@@ -479,14 +478,13 @@ int main(int argc, char* argv[])
                   sem_wait(&sems[3]);
 				  usleep(sleep_time);
                   pop(queue, &pop_buf);
-                  sem_wait(&sems[4]);
-                  *count_pop += 1;
-                  sem_post(&sems[4]);
+                  //sem_wait(&sems[4]);
+                  //*count_pop += 1;
+                  //sem_post(&sems[4]);
                   sprintf(fname, "./%d.png", pop_buf.seq+1);
                   printf("%d   %zu   %s\n", pop_buf.seq, pop_buf.size,pop_buf.buf);
                   write_file(fname, pop_buf.buf, pop_buf.size);
                   recv_buf_cleanup(&pop_buf);
-                  printf("--------------(%d)------\n", pop_buf.seq);
                   sem_post(&sems[3]);
                   sem_post(&sems[1]);
 

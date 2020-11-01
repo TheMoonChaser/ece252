@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "shm_stack.h"
 
 /* a stack that can hold integers */
@@ -172,6 +173,9 @@ int push(ISTACK *p, RECV_BUF item)
     if ( !is_full(p) ) {
         ++(p->pos);
         p->items[p->pos] = item;
+		char * data_pos = (char *) ((char*)p + sizeof(ISTACK)+ sizeof(RECV_BUF) * p->size + p->pos*sizeof(char)*10240); 
+		memcpy(data_pos,item.buf,10240);
+		p->items[p->pos].buf = data_pos;
         return 0;
     } else {
         return -1;
@@ -193,7 +197,10 @@ int pop(ISTACK *p, RECV_BUF *p_item)
     }
 
     if ( !is_empty(p) ) {
+		char * heap_location = p_item->buf;
         *p_item = p->items[p->pos];
+		memcpy(heap_location,p->items[p->pos].buf,10240);
+		p_item->buf = heap_location;
         (p->pos)--;
         return 0;
     } else {
