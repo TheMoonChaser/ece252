@@ -61,7 +61,7 @@ typedef struct int_stack
 
 int sizeof_shm_stack(int size)
 {
-    return (sizeof(ISTACK) + sizeof(RECV_BUF) * size);
+    return (sizeof(ISTACK) + (sizeof(RECV_BUF)+sizeof(char)*10240) * size);
 }
 
 /**
