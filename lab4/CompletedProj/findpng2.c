@@ -45,7 +45,7 @@ int PNG_counter;				  //count number of PNGs already got
 int wait_thread_counter;		  //count number of threads are waiting for FRONTIER
 int frontier_counter;             //count elements in queue.
 int max_png;					  //copy of m
-int max_thread                    //copy of t
+int max_thread;                    //copy of t
 sem_t sem1;                       //semaphores #1
 sem_t sem2;                       //semaphores #2
 pthread_mutex_t count_mutex ;        //mutex for conditional variable
@@ -150,6 +150,8 @@ int find_http(char *buf, int size, int follow_relative_links, const char *base_u
             if ( href != NULL && !strncmp((const char *)href, "http", 4) ) {
 			   //lock mutex 1
 			   sem_wait(&sem1);
+			   //lock mutex
+			   pthread_mutex_lock(&count_mutex);
 			   e.key = (char *)href;
 			   int err = hsearch_r(e, FIND, &ep, &htab);
 			   //if not found in visited
@@ -171,9 +173,15 @@ int find_http(char *buf, int size, int follow_relative_links, const char *base_u
 					 frontier_counter += 1;
 				  }
 			   }
-
-			   //unlock mutex 1	
-			   sem_post(&sem1);	   
+               if (wait_thread_counter > 0 && frontier_counter >0 ){
+			       pthread_cond_signal(&count_threshold_cv);
+				   pthread_mutex_unlock(&count_mutex);
+				   //dont need to post sem1 
+			   }
+			   else{
+			       pthread_mutex_unlock(&count_mutex);
+				   sem_post(&sem1); 
+			   }
             }
             xmlFree(href);
         }
@@ -434,7 +442,6 @@ int process_data(CURL *curl_handle, RECV_BUF *p_recv_buf)
     } else if ( strstr(ct, CT_PNG) ) {
         return process_png(curl_handle, p_recv_buf);
     }
-i
     return 0;
 }
 
@@ -461,20 +468,22 @@ void* get_fragment_urls(void* thread_input){
 	   sem_post(&sem2);
 	    
 	   if (frontier_counter <= 0){
+	      pthread_mutex_lock(&count_mutex);
           wait_thread_counter++;
 		  if (wait_thread_counter < max_thread){
-		     cond_wait(&count_threshold_cv,&sem1);
+		     sem_post(&sem1);
+		     pthread_cond_wait(&count_threshold_cv,&count_mutex);
 		  }
 		  else{
-		  	 cond_broadcast(&count_threshold_cv);
+		  	 pthread_cond_broadcast(&count_threshold_cv);
 		  }
 		  if (frontier_counter <= 0){
-		     sem_post(&sem1);
+		     pthread_mutex_unlock(&count_mutex);
 	         break;		 
 		  }
 		  else{
-			   //之前我在等，现在我拿到frontier的数据了，所以我不等了。
-		  	   wait_thread_counter--;
+			 //get new urls from frontier 
+		  	 wait_thread_counter--;
 		  }
 		  
 	   }
@@ -677,7 +686,7 @@ int main( int argc, char** argv){
    sem_destroy(&sem1);
    sem_destroy(&sem2);
    pthread_mutex_destroy(&count_mutex);
-   ptherad_cond_destroy(&count_threshold_cv);
+   pthread_cond_destroy(&count_threshold_cv);
 
    //time count
    if (gettimeofday(&tv, NULL) != 0) {
