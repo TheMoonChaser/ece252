@@ -43,8 +43,13 @@ char** visited_urls;			  //store all visited urls
 int visited_counter;			  //track visited urls counter
 int PNG_counter;				  //count number of PNGs already got
 int wait_thread_counter;		  //count number of threads are waiting for FRONTIER
+int frontier_counter;             //count elements in queue.
 int max_png;					  //copy of m
-
+int max_thread                    //copy of t
+sem_t sem1;                       //semaphores #1
+sem_t sem2;                       //semaphores #2
+pthread_mutex_t count_mutex ;        //mutex for conditional variable
+pthread_cond_t count_threshold_cv ;  //conditional variable
 
 typedef struct recv_buf2 {
      char *buf;       /* memory to hold a copy of received data */
@@ -143,26 +148,13 @@ int find_http(char *buf, int size, int follow_relative_links, const char *base_u
                 xmlFree(old);
             }
             if ( href != NULL && !strncmp((const char *)href, "http", 4) ) {
+			   //lock mutex 1
+			   sem_wait(&sem1);
 			   e.key = (char *)href;
 			   int err = hsearch_r(e, FIND, &ep, &htab);
 			   //if not found in visited
                if(err == 0){
 				  int already_in_queue = 0;
-//		          char* new_url = malloc(256*sizeof(char));
-//				  strcpy(new_url, (char *)href);
-//				  e.key = new_url;
-//				  e.data = new_url;
-//				  int res = hsearch_r(e, ENTER, &ep, &htab);
-//				  //no more room
-//				  if(res == 0){
-//				     free(new_url);
-//				     return 0;
-//			      }
-//
-//                  //put the url into visited store
-//                  visited_urls[visited_counter] = (char *)new_url;
-//	              visited_counter++; 
-//
                   //check whether already in the queue
                   QueueNode* start = queue->head;
 				  while(start != NULL){
@@ -176,8 +168,12 @@ int find_http(char *buf, int size, int follow_relative_links, const char *base_u
 	                 char* unvisited_url = malloc(256*sizeof(char));
                      strcpy(unvisited_url, (char*)href);
 				     Queue_AddToHead(queue, unvisited_url);
+					 frontier_counter += 1;
 				  }
-			   }		   
+			   }
+
+			   //unlock mutex 1	
+			   sem_post(&sem1);	   
             }
             xmlFree(href);
         }
@@ -374,7 +370,8 @@ int process_png(CURL *curl_handle, RECV_BUF *p_recv_buf)
     char *eurl = NULL;          /* effective URL */
     curl_easy_getinfo(curl_handle, CURLINFO_EFFECTIVE_URL, &eurl);
     if ( eurl != NULL) {
-       //mutex
+       //lock mutex 2
+	   sem_wait(&sem2);
 	   //check whether the PNG url already exist
 	   for(int i = 0; i < PNG_counter; i++){
           if(strcmp(fragment_urls[i], eurl) == 0){
@@ -392,10 +389,12 @@ int process_png(CURL *curl_handle, RECV_BUF *p_recv_buf)
        if(!png_signature_is_correct){
 		  return 0;
 	   }
-
-       strcpy(fragment_urls[PNG_counter], eurl);
-       PNG_counter++;
-	   //mutex 
+       if (PNG_counter < max_png){ 
+          strcpy(fragment_urls[PNG_counter], eurl);
+          PNG_counter++;
+	   }
+	   //unlock mutex 2
+	   sem_post(&sem2);
     }
 
     return 0;
@@ -435,7 +434,7 @@ int process_data(CURL *curl_handle, RECV_BUF *p_recv_buf)
     } else if ( strstr(ct, CT_PNG) ) {
         return process_png(curl_handle, p_recv_buf);
     }
-
+i
     return 0;
 }
 
@@ -447,19 +446,45 @@ void* get_fragment_urls(void* thread_input){
 	   RECV_BUF recv_buf;
 	   char *url;
 
-       //mutex 
-       if(PNG_counter >= max_png || queue->head == NULL){
-          break;
+	   //lock mutex 1
+       sem_wait(&sem1);
+	   //lock mutex 2
+	   sem_wait(&sem2);
+       if(PNG_counter >= max_png){
+		  //unlock mutex 2
+		  sem_post(&sem2);
+          //unlock mutex 1
+		  sem_post(&sem1);
+	      break;
 	   }
-	   url = (char*)Queue_GetFromTail(queue); 
-	   //mutex
-      
+	   //unlock mutex 2
+	   sem_post(&sem2);
+	    
+	   if (frontier_counter <= 0){
+          wait_thread_counter++;
+		  if (wait_thread_counter < max_thread){
+		     cond_wait(&count_threshold_cv,&sem1);
+		  }
+		  else{
+		  	 cond_broadcast(&count_threshold_cv);
+		  }
+		  if (frontier_counter <= 0){
+		     sem_post(&sem1);
+	         break;		 
+		  }
+		  else{
+			   //之前我在等，现在我拿到frontier的数据了，所以我不等了。
+		  	   wait_thread_counter--;
+		  }
+		  
+	   }
+
+
+	   url = (char*)Queue_GetFromTail(queue);
+       frontier_counter -= 1;
 	   //put the url into hash table
        e.key = url;
 	   e.data = (void*)url;
-       //int err = hsearch_r(e, FIND, &ep, &htab);
-       //if found in visited
-       //if(err == 0){
 	   int resp = hsearch_r(e, ENTER, &ep, &htab);
 	   //no more room
 	   if(resp == 0){
@@ -469,7 +494,10 @@ void* get_fragment_urls(void* thread_input){
          visited_urls[visited_counter] = url;
 	     visited_counter++; 
 	   }
-	   //}
+	   //unlock mutex 1
+	   sem_post(&sem1);
+	   
+
 	   curl_handle = easy_handle_init(&recv_buf, url);
        if ( curl_handle == NULL ) {
           fprintf(stderr, "Curl initialization failed. Exiting...\n");
@@ -502,6 +530,7 @@ int main( int argc, char** argv){
    visited_counter = 0;
    PNG_counter = 0;
    wait_thread_counter = 0;
+   frontier_counter = 1;
   
    //Timer start.
    if (gettimeofday(&tv, NULL) != 0) {
@@ -540,6 +569,8 @@ int main( int argc, char** argv){
 
    //copy m
    max_png = m;
+   //copy t
+   max_thread = t;
 
    //Initialize hash table
    //htab = calloc(VISITED_SIZE, sizeof(ENTRY));
@@ -562,11 +593,32 @@ int main( int argc, char** argv){
    //initialize visited urls store
    visited_urls = malloc((VISITED_SIZE*sizeof(char*)));
    
+   //initialize semaphores
+   sem_init(&sem1,0,1);
+   sem_init(&sem2,0,1);
+
+   //initialize mutex and conditional variable
+   pthread_mutex_init(&count_mutex,NULL);
+   pthread_cond_init(&count_threshold_cv,NULL);
+
+   //initialize threads
+   const int thread_num = t;
+   pthread_t tid[thread_num];
+
    //initialize libcurl before any thread
    curl_global_init(CURL_GLOBAL_DEFAULT);
 
+   //create threads
+   for (int i=0; i < thread_num;i++){
+      pthread_create(&tid[i],NULL,get_fragment_urls,NULL);
+   }
+   //join threads
+   for (int i=0; i< thread_num; i++){
+      pthread_join(tid[i],NULL);
+   }
+
    //Find PNG urls
-   get_fragment_urls(NULL);
+   //get_fragment_urls(NULL);
 
    if(!(log_file_name[0] == '\0')){
       //Open a file
@@ -620,9 +672,12 @@ int main( int argc, char** argv){
       data = Queue_GetFromHead(queue);
    }
    free(queue);
-   //Queue_Free(queue, true);
    hdestroy_r(&htab);
    curl_global_cleanup();
+   sem_destroy(&sem1);
+   sem_destroy(&sem2);
+   pthread_mutex_destroy(&count_mutex);
+   ptherad_cond_destroy(&count_threshold_cv);
 
    //time count
    if (gettimeofday(&tv, NULL) != 0) {
@@ -632,5 +687,5 @@ int main( int argc, char** argv){
    times[1] = (tv.tv_sec) + tv.tv_usec/1000000.;
    printf("findpng2 execution time: %.2lf seconds\n", times[1] - times[0]);
 
-   return 0;
+   pthread_exit(0);
 }
